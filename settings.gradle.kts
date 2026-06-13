@@ -24,4 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "TundraSurvivors"
 include(":app")
- 
+include(":a2dg")

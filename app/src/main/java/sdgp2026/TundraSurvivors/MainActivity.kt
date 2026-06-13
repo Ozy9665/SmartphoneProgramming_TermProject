@@ -1,20 +1,16 @@
 package sdgp2026.TundraSurvivors
 
 import android.os.Bundle
-import androidx.activity.enableEdgeToEdge
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
+import kr.ac.tukorea.ge.spgp2026.a2dg.activity.BaseGameActivity
 
-class MainActivity : AppCompatActivity() {
+
+class MainActivity : BaseGameActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContentView(R.layout.activity_main)
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-            insets
-        }
+    }
+
+    // MainScene 띄우기
+    override fun getStartScene(): Scene {
+        return MainScene(gameView.gameContext)
     }
 }

@@ -1,9 +1,9 @@
 plugins {
-    alias(libs.plugins.android.application)
+    id("com.android.library")
 }
 
 android {
-    namespace = "sdgp2026.TundraSurvivors"
+    namespace = "kr.ac.tukorea.ge.spgp2026.a2dg"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -11,13 +11,10 @@ android {
     }
 
     defaultConfig {
-        applicationId = "sdgp2026.TundraSurvivors"
-        minSdk = 26
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        minSdk = 24
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     buildTypes {
@@ -39,9 +36,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
-    implementation(libs.androidx.activity)
-    implementation(libs.androidx.constraintlayout)
-    implementation(project(":a2dg"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
