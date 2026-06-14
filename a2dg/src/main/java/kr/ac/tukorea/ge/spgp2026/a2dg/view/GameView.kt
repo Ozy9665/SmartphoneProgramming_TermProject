@@ -27,6 +27,7 @@ class GameView @JvmOverloads constructor(
 
     // 프레임 시간, 리소스 접근, 화면 metrics, scene stack 같은 공통 게임 문맥을 한곳에 모아 둔다.
     private val gctx = GameContext(this)
+    private var running = true
 
     // context 가 Activity 이면 바로 반환하고,
     // ContextThemeWrapper 같은 래퍼가 감싸고 있으면 체인을 따라가며 Activity 를 찾는다.
@@ -49,6 +50,13 @@ class GameView @JvmOverloads constructor(
     }
 
     init {
+        // SceneStack 은 Activity 를 직접 모르므로, stack 이 비었을 때의 바깥 처리는 GameView 가 연결한다.
+        // 게임 UI 에서 popAll() 을 호출하면 이 callback 을 통해 Activity.finish() 로 이어진다.
+        // Activity.finish() 이후 onDestroy() 가 다시 호출되더라도, 그쪽은 destroyGame() 에서 popAll(false) 를 쓰므로
+        // Scene 정리와 Activity 종료 요청이 서로 무한히 되먹임되지 않는다.
+        gctx.sceneStack.onEmptyStack = {
+            activity?.finish()
+        }
         Choreographer.getInstance().postFrameCallback(this)
     }
 
@@ -63,6 +71,33 @@ class GameView @JvmOverloads constructor(
         gctx.sceneStack.top?.update(gctx)
     }
 
+    // 앱이 background 로 내려가는 동안에는 doFrame() 을 더 예약하지 않게 멈춘다.
+    // 이때 현재 Scene 에도 onPause() 를 전달해 각 장면이 입력, 사운드 같은 부수 상태를 정리할 기회를 준다.
+    fun pauseGame() {
+        if (!running) return
+        running = false
+        gctx.sceneStack.top?.onPause()
+    }
+
+    // foreground 로 돌아올 때는 직전 nanos 를 0 으로 끊어 준다.
+    // 그렇지 않으면 pause 되어 있던 시간 전체가 다음 doFrame() 의 frameTime 으로 잡혀
+    // 총알, 적, 쿨타임이 한 프레임에 훅 진행된 것으로 보일 수 있다.
+    fun resumeGame() {
+        if (running) return
+        running = true
+        gctx.currentTimeNanos = 0L
+        Choreographer.getInstance().postFrameCallback(this)
+        gctx.sceneStack.top?.onResume()
+    }
+
+    fun destroyGame() {
+        // Activity.onDestroy() 는 이미 Activity 가 끝나는 중인 lifecycle 정리이다.
+        // 이 경우에는 Scene 들의 onExit() 만 실행하고, onEmptyStack callback 으로 finish() 를 다시 요청하지 않는다.
+        // 앱 내부 Exit 로 먼저 popAll(true) 가 실행된 뒤라면 stack 은 이미 비어 있을 수 있는데,
+        // 그 경우에도 popAll(false) 는 빈 stack 을 정리하려는 안전한 no-op 으로 끝난다.
+        gctx.sceneStack.popAll(finishesActivity = false)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
@@ -72,10 +107,36 @@ class GameView @JvmOverloads constructor(
             if (drawsDebugGrid) {
                 drawDebugGrid() // 가상 좌표계의 격자선을 그린다.
             }
-            gctx.sceneStack.top?.draw(this)
+            drawScenes(canvas)
             if (drawsDebugInfo || drawsFpsGraph) {
                 drawDebugInfo() // FPS 등의 디버그 정보를 그린다.
             }
+        }
+    }
+
+    private fun drawScenes(canvas: Canvas) {
+        val stack = gctx.sceneStack
+        if (stack.isEmpty) return
+
+        // top Scene 이 transparent 이면 그 아래 Scene 도 같이 그려야 한다.
+        // 위에서부터 아래로 내려가며 transparent 가 아닌 첫 Scene 을 찾고,
+        // 그 Scene 부터 top Scene 까지 다시 순서대로 그린다.
+        // 이렇게 하면 MainScene 위에 PauseScene 같은 overlay 를 올릴 수 있다.
+        var firstIndex = stack.lastIndex
+        while (firstIndex > 0 && stack.sceneAt(firstIndex).isTransparent) {
+            firstIndex--
+        }
+
+        var index = firstIndex
+        while (index <= stack.lastIndex) {
+            val scene = stack.sceneAt(index)
+            val saveCount = canvas.save()
+            if (scene.clipsRect) {
+                canvas.clipRect(gctx.metrics.borderRect)
+            }
+            scene.draw(canvas)
+            canvas.restoreToCount(saveCount)
+            index++
         }
     }
 
@@ -88,7 +149,8 @@ class GameView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        return (gctx.sceneStack.top?.onTouchEvent(event) ?: false) || super.onTouchEvent(event)
+        val handled = gctx.sceneStack.top?.onTouchEvent(event) ?: false
+        return handled || super.onTouchEvent(event)
     }
 
     fun onBackPressed(): Boolean {
@@ -99,6 +161,10 @@ class GameView @JvmOverloads constructor(
     // doFrame() 이 최초 호출 된 시점에는 previousNanos 가 0 이어서
     // 매우 큰 frameTime 이 생성되므로 0 일때에는 하면 안 된다.
     override fun doFrame(nanos: Long) {
+        // pauseGame() 직전에 이미 예약돼 있던 callback 하나가 늦게 도착할 수 있으므로,
+        // 멈춘 상태에서는 frameTime 계산이나 update 를 진행하지 않고 바로 무시한다.
+        if (!running) return
+
         val previousNanos = gctx.currentTimeNanos
         gctx.currentTimeNanos = nanos
         if (previousNanos != 0L) {
@@ -106,15 +172,15 @@ class GameView @JvmOverloads constructor(
             update()
 
             // Scene 의 update 나 touch 처리 도중 마지막 Scene 이 pop() 되어
-            // stack 이 비었다면 더 이상 그릴 것이 없으므로 Activity 를 종료한다.
+            // stack 이 비었다면 onEmptyStack callback 이 Activity 종료를 맡는다.
+            // 여기서는 더 이상 그릴 것이 없으므로 다음 draw 예약 없이 빠져나간다.
             if (gctx.sceneStack.top == null) {
-                activity?.finish()
                 return
             }
 
             invalidate()
         }
-        if (isShown) {
+        if (running && isShown) {
             Choreographer.getInstance().postFrameCallback(this)
         }
     }
@@ -137,7 +203,7 @@ class GameView @JvmOverloads constructor(
 
     // 가상 좌표계가 실제로 어떤 범위와 간격을 가지는지 눈으로 확인하려고 그리는 디버그 격자이다.
     private fun Canvas.drawDebugGrid() {
-        drawRect(borderRect, borderPaint) // 현재 가상 좌표계의 경계
+        drawRect(gctx.metrics.borderRect, borderPaint) // 현재 가상 좌표계의 경계
         val step = 100f
 
         // 세로 격자선은 x 값을 100씩 늘리며 위에서 아래로 선을 긋는다.
@@ -155,7 +221,6 @@ class GameView @JvmOverloads constructor(
         }
     }
 
-    private val borderRect by lazy { RectF(0f, 0f, gctx.metrics.width, gctx.metrics.height) }
     private val borderPaint by lazy {
         Paint().apply {
             style = Paint.Style.STROKE // 테두리만 그린다.
