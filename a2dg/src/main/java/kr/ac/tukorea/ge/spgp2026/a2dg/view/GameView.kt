@@ -101,6 +101,8 @@ class GameView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
+        canvas.drawColor(android.graphics.Color.DKGRAY)
+
         // 이 블록 안에서는 실제 화면 좌표가 아니라
         // 현재 GameMetrics 가 들고 있는 가상 좌표계 기준으로 그린다고 생각하면 된다.
         canvas.withMatrix(gctx.metrics.transformMatrix) {
