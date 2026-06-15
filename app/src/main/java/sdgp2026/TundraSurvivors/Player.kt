@@ -7,7 +7,7 @@ import kr.ac.tukorea.ge.spgp2026.a2dg.objects.JoyStick
 import kotlin.math.cos
 import kotlin.math.sin
 
-class Player(gctx: GameContext, val joystick: JoyStick, val bg: Background) : SheetSprite(gctx, R.mipmap.player_sprite, 3f) {
+class Player(gctx: GameContext, val joystick: JoyStick, val bg: Background) : SheetSprite(gctx, R.mipmap.player_sprite, 5f) {
 
     private var speed = 15f
 
@@ -31,10 +31,10 @@ class Player(gctx: GameContext, val joystick: JoyStick, val bg: Background) : Sh
     )
 
     init {
-        this.x = 1000f
-        this.y = 500f
-        this.width = 300f
-        this.height = 300f
+        this.x = gctx.metrics.width / 2f
+        this.y = gctx.metrics.height / 2f
+        this.width = 250f
+        this.height = 250f
 
         // 기본 상태는 앞모습(Down)으로 초기화
         this.frameRects = walkDownFrames
