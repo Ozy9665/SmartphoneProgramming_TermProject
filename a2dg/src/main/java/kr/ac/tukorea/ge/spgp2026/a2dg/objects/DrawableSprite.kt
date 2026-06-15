@@ -20,7 +20,7 @@ class DrawableSprite(
     private var y = 0f
     private var width = 0f
     private var height = 0f
-    val drawable = drawable
+    var drawable = drawable
         private set
     
     override fun update(gctx: GameContext) {
