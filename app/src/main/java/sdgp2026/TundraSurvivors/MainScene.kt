@@ -9,74 +9,222 @@ import kr.ac.tukorea.ge.spgp2026.a2dg.objects.JoyStick
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
-
+import android.media.SoundPool
 enum class Layer {
-    BG, PLAYER, UI
+    BG, PLAYER, PROJECTILE, UI
 }
-
 class MainScene(gctx: GameContext) : Scene(gctx) {
 
     override val world = World(Layer.values())
-
     private val background = Background(gctx)
+    val joystick = JoyStick(gctx, R.mipmap.joystick_bg, R.mipmap.joystick_thumb, 250f, 750f, 130f, 45f)
+    val player = Player(gctx, joystick, background)
+    private val gameUi = GameUi(gctx, this)
 
-    val joystick = JoyStick(
-        gctx,
-        R.mipmap.joystick_bg,
-        R.mipmap.joystick_thumb,
-        250f, 750f, 130f, 45f
-    )
+    val startTime = System.currentTimeMillis()
+    private val levelUpUi = LevelUpUi(gctx, this)
+    private var isLevelUpMode = false
+    private var isGameOver = false
+    private var isBgmStarted = false
+    private val soundPool = SoundPool.Builder().setMaxStreams(10).build()
+    private var sfxFire = 0
+    private var sfxHit = 0
+    private var sfxSlime = 0
+    private var sfxGolem = 0
 
-    private val player = Player(gctx, joystick, background)
+    var totalFrames = 0
+    var score = 0
+    var exp = 0
+    var maxExp = 10
+    var level = 1
 
-    // ⏱️ 스폰 타이머 변수 세팅
-    private var enemySpawnTimer = 0f
-    private val spawnInterval = 1.0f // 1.0초마다 1마리씩 생성 (원하면 0.5f 등으로 줄여서 난이도 조절 가능!)
+    private var fireballDamage = 1
+    private var fireballSize = 200f
+    private var fireInterval = 30
+    private var fireballCount = 1
+    private var enemyFrameCount = 0
+    private var fireFrameCount = 0
+    private var lastAngle = 0f
     private var bgm: MediaPlayer? = null
+
+    private val enemies = mutableListOf<Enemy>()
+    private val projectiles = mutableListOf<Fireball>()
 
     init {
         world.add(background, Layer.BG)
         world.add(player, Layer.PLAYER)
         world.add(joystick, Layer.UI)
+        world.add(gameUi, Layer.UI)
 
         bgm = MediaPlayer.create(MainActivity.mContext, R.raw.bgm_stage)
         bgm?.isLooping = true
-        bgm?.start()
+        bgm?.setVolume(1.0f, 1.0f)
+
+        sfxFire = soundPool.load(MainActivity.mContext, R.raw.sfx_fire, 1)
+        sfxHit = soundPool.load(MainActivity.mContext, R.raw.sfx_hit, 1)
+        sfxSlime = soundPool.load(MainActivity.mContext, R.raw.sfx_slime, 1)
+        sfxGolem = soundPool.load(MainActivity.mContext, R.raw.sfx_golem, 1)
     }
 
-    private var frameCount = 0
-    private val spawnIntervalFrames = 60 // 60프레임 = 약 1초 (30으로 줄이면 0.5초마다 폭풍 스폰!)
-
-    // [핵심!] 매 프레임마다 불리는 update 함수를 오버라이드하여 스포너를 가동합니다.
     override fun update(gctx: GameContext) {
+        if (isLevelUpMode|| isGameOver) return
+
         super.update(gctx)
+        totalFrames++
 
-        // 매 프레임마다 카운터를 1씩 올립니다.
-        frameCount++
+        if (totalFrames == 30 && !isBgmStarted) {
+            isBgmStarted = true
+            bgm?.start()
+        }
 
-        // 카운터가 목표치(60프레임 = 1초)에 도달했다면?
-        if (frameCount >= spawnIntervalFrames) {
-            frameCount = 0 // 카운터 다시 0으로 초기화!
+        val difficultyFactor = totalFrames / 600
+        val currentSpawnInterval = Math.max(10, 60 - difficultyFactor)
+        enemyFrameCount++
+        if (enemyFrameCount >= currentSpawnInterval) {
+            enemyFrameCount = 0
+            spawnTimelineEnemy(gctx)
+        }
 
-            // 1. 0도 ~ 360도(2파이) 사이의 무작위 각도(라디안)를 뽑아냅니다.
-            val angle = Random.nextFloat() * 2 * Math.PI
+        fireFrameCount++
+        if (fireFrameCount >= fireInterval) {
+            fireFrameCount = 0
+            shootFireball(gctx)
+        }
 
-            // 2. 화면 밖으로 스폰하기 위해, 화면 가로/세로 중 더 긴 값의 절반 + 300f(여유공간)를 반지름으로 삼습니다.
-            val spawnRadius = Math.max(gctx.metrics.width, gctx.metrics.height) / 2f + 300f
+        checkCollisions()
+    }
 
-            // 3. 마법의 삼각함수! 플레이어 위치를 중심으로 원 테두리의 X, Y 좌표를 계산합니다.
-            val spawnX = player.x + (spawnRadius * cos(angle)).toFloat()
-            val spawnY = player.y + (spawnRadius * sin(angle)).toFloat()
+    private fun spawnTimelineEnemy(gctx: GameContext) {
+        val angle = Random.nextFloat() * 2 * Math.PI
+        val spawnRadius = Math.max(gctx.metrics.width, gctx.metrics.height) / 2f + 300f
+        val spawnX = player.x + (spawnRadius * cos(angle)).toFloat()
+        val spawnY = player.y + (spawnRadius * sin(angle)).toFloat()
+        val enemyType = if (totalFrames < 900) EnemyType.SLIME else if (Random.nextBoolean()) EnemyType.SLIME else EnemyType.GOLEM
 
-            // 4. 화면 밖 좌표에 몬스터를 생성해서 월드에 추가합니다.
-            world.add(Enemy(gctx, player, spawnX, spawnY), Layer.PLAYER)
+        val enemy = Enemy(gctx, player, spawnX, spawnY, enemyType)
+        world.add(enemy, Layer.PLAYER)
+        enemies.add(enemy)
+    }
+
+    private fun shootFireball(gctx: GameContext) {
+        if (joystick.power > 0f) {
+            lastAngle = joystick.angle
+        }
+
+        val spreadAngle = Math.toRadians(15.0).toFloat() // 15도를 라디안으로 변환
+        val startAngle = lastAngle - (spreadAngle * (fireballCount - 1) / 2f)
+        soundPool.play(sfxFire, 0.5f, 0.5f, 0, 0, 1f)
+        for (i in 0 until fireballCount) {
+            val currentAngle = startAngle + (spreadAngle * i)
+            val fireball = Fireball(gctx, player.x, player.y, currentAngle)
+
+            fireball.width = fireballSize
+            fireball.height = fireballSize
+            world.add(fireball, Layer.PROJECTILE)
+            projectiles.add(fireball)
+        }
+    }
+    private fun checkCollisions() {
+        val deadEnemies = mutableListOf<Enemy>()
+        val spentProjectiles = mutableListOf<Fireball>()
+
+        for (ball in projectiles) {
+            for (enemy in enemies) {
+                val radiusSum = (ball.width / 2f) + (enemy.width / 2f)
+                if (Math.abs(ball.x - enemy.x) < radiusSum && Math.abs(ball.y - enemy.y) < radiusSum) {
+                    enemy.takeDamage(fireballDamage, Math.cos(ball.angle.toDouble()).toFloat() * 25f, Math.sin(ball.angle.toDouble()).toFloat() * 25f)
+                    spentProjectiles.add(ball)
+                    soundPool.play(sfxHit, 0.6f, 0.6f, 0, 0, 1f)
+                    if (enemy.hp <= 0) {
+                        deadEnemies.add(enemy)
+                        if (enemy.type == EnemyType.SLIME) {
+                            soundPool.play(sfxSlime, 0.8f, 0.8f, 0, 0, 1f)
+                        } else {
+                            soundPool.play(sfxGolem, 1.0f, 1.0f, 0, 0, 1f)
+                        }
+                    }
+                    break
+                }
+            }
+        }
+
+        for (enemy in enemies) {
+            if (deadEnemies.contains(enemy)) continue
+
+            val radiusSum = (player.width / 2f) + (enemy.width / 2f) - 20f
+
+            if (Math.abs(player.x - enemy.x) < radiusSum && Math.abs(player.y - enemy.y) < radiusSum) {
+                player.takeDamage(1)
+
+                if (player.hp <= 0 && !isGameOver) {
+                    isGameOver = true
+
+                    bgm?.stop()
+                    bgm?.release()
+                    bgm = null
+
+                    gctx.sceneStack.pop()
+                    gctx.sceneStack.push(TitleScene(gctx))
+                    return
+                }
+            }
+        }
+
+        for (ball in spentProjectiles) { world.remove(ball, Layer.PROJECTILE); projectiles.remove(ball) }
+        for (enemy in deadEnemies) {
+            world.remove(enemy, Layer.PLAYER); enemies.remove(enemy)
+            score += if (enemy.type == EnemyType.SLIME) 10 else 30
+            exp += if (enemy.type == EnemyType.SLIME) 1 else 3
+
+            if (exp >= maxExp) {
+                startLevelUp()
+            }
+        }
+    }
+
+    private fun startLevelUp() {
+        isLevelUpMode = true
+        level++
+        exp = 0
+        maxExp = (maxExp * 1.5f).toInt()
+        levelUpUi.rollPerks()
+    }
+
+    private fun applyPerk(perk: Perk) {
+        when(perk.id) {
+            0 -> fireInterval = Math.max(5, fireInterval - 5)
+            1 -> fireballSize *= 1.5f
+            2 -> fireballDamage += 1
+            3 -> fireballCount += 1
+            4 -> score += 1000
+            5 -> player.hp = Math.min(player.maxHp, player.hp + 3)
+        }
+
+        levelUpUi.increasePerkLevel(perk.id)
+        isLevelUpMode = false
+    }
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        super.draw(canvas)
+        if (isLevelUpMode) {
+            levelUpUi.draw(canvas)
         }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (joystick.onTouchEvent(event)) {
+        val pt = gctx.metrics.fromScreen(event.x, event.y)
+
+        if (isLevelUpMode) {
+            if (event.action == MotionEvent.ACTION_UP) {
+                val clickedIndex = levelUpUi.checkClick(pt.x, pt.y)
+                if (clickedIndex != -1) {
+                    applyPerk(levelUpUi.currentPerks[clickedIndex])
+                }
+            }
             return true
         }
+
+        if (joystick.onTouchEvent(event)) return true
         return true
     }
 }

@@ -19,7 +19,8 @@ class TitleBackground(gctx: GameContext) : Sprite(gctx, R.mipmap.title) {
         syncDstRect()
     }
 }
-
+private var isStarting = false
+private var startTimer = 0
 class TitleScene(gctx: GameContext) : Scene(gctx) {
 
     override val world = World(Layer.values())
@@ -32,18 +33,23 @@ class TitleScene(gctx: GameContext) : Scene(gctx) {
 
         bgm = MediaPlayer.create(MainActivity.mContext, R.raw.bgm_title)
         bgm?.isLooping = true
-        bgm?.start()
     }
+    override fun update(gctx: GameContext) {
+        super.update(gctx)
+        startTimer++
 
+        if (startTimer == 30) {
+            bgm?.start()
+        }
+    }
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_DOWN) {
+        if (event.action == MotionEvent.ACTION_UP && !isStarting) {
+            isStarting = true
             bgm?.stop()
             bgm?.release()
             bgm = null
-
             gctx.sceneStack.push(MainScene(gctx))
         }
         return true
-
     }
 }
