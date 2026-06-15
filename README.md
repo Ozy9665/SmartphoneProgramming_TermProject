@@ -43,6 +43,7 @@
    - 보스 및 몬스터 돌진, 원거리 미구현
 - 주차별 커밋 횟수
 <img width="809" height="320" alt="스크린샷 2026-06-15 221338" src="https://github.com/user-attachments/assets/9c3f116c-abf5-4a4f-afa0-89b7973c3210" />
+
 - 구체적 나열
   - 사용한 기술 : 객체지향 설계 기반의 컴포넌트 시스템: 모든 게임 오브젝트(Enemy, Fireball, Player)를 IGameObject 인터페이스와 Sprite 클래스를 상속받아 독립적인 update()와 draw()를 수행하도록 설계했습니다.
                  AABB 박스 충돌 판정 알고리즘: Math.abs(ball.x - enemy.x) < radiusSum과 같은 절대값 연산을 사용하여 사각형 범위 기반의 실시간 충돌을 구현했습니다.
